@@ -282,6 +282,37 @@ function pickTarget(src){
   dst.tracks=dst.tracks.concat(add);await save();render();closeM();
   toast(add.length?`${add.length} titres copiés vers ${dst.name}`:"Tout y était déjà","ok")}}
 
+/* ===== Quota & statistiques ===== */
+let Q=null;
+const ptDay=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/Los_Angeles"}).format(new Date());
+async function qGet(){if(!Q){try{Q=JSON.parse(await DB.get("quota"))}catch(e){}}
+ if(!Q||Q.day!==ptDay())Q={day:ptDay(),used:0,s:0,l:0};return Q}
+async function spend(n,k){const q=await qGet();q.used+=n;q[k]=(q[k]||0)+1;await DB.set("quota",JSON.stringify(q))}
+async function stats(){
+ const q=await qGet(),MAX=10000,pct=Math.min(100,q.used/MAX*100);
+ const all=S.pls.flatMap(p=>p.tracks),by=k=>all.filter(t=>t.p===k).length;
+ const lnk=all.filter(t=>t.p==="deezer"&&t.yt&&t.yt!=="no").length;
+ const col=pct>80?"#fb7185":pct>50?"#fbbf24":"#4ade80";
+ $("mod").innerHTML=`<h3>📊 Statistiques</h3>
+ <p>Quota YouTube du jour · remise à zéro chaque matin vers 9 h, heure belge.</p>
+ <div style="font-size:27px;font-weight:800">${q.used.toLocaleString("fr")}<span style="font-size:13px;color:var(--dim);font-weight:600"> / ${MAX.toLocaleString("fr")} unités</span></div>
+ <div style="height:9px;background:#26263a;border-radius:9px;overflow:hidden;margin:10px 0 6px">
+  <div style="height:100%;width:${pct}%;background:${col};border-radius:9px;transition:width .7s"></div></div>
+ ${[["🔍 Recherches de titres",`${q.s||0} × 100 = ${(q.s||0)*100}`],
+    ["📥 Pages de playlist importées",`${q.l||0} × 1 = ${q.l||0}`],
+    ["🎯 Titres Deezer encore associables aujourd'hui",`${Math.max(0,Math.floor((MAX-q.used)/100))}`],
+    ["🎵 Titres au total",`${all.length}`],
+    ["📂 Playlists",`${S.pls.length}`],
+    ["▶️ Lisibles en entier",`${by("youtube")+by("local")+lnk}`],
+    ["💾 Fichiers hors connexion",`${by("local")}`]]
+   .map(([a,b])=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:13px">
+     <span style="color:var(--dim)">${a}</span><b style="white-space:nowrap">${b}</b></div>`).join("")}
+ <div class="row"><button class="ghost" style="flex:1" id="rz">Remettre le compteur à zéro</button><button style="flex:1" id="ok2">Fermer</button></div>`;
+ $("ov").classList.remove("hide");$("ok2").onclick=closeM;
+ $("rz").onclick=async()=>{Q={day:ptDay(),used:0,s:0,l:0};await DB.set("quota",JSON.stringify(Q));closeM();toast("Compteur remis à zéro","ok")}}
+const statb=document.createElement("button");statb.className="iconb";statb.textContent="📊";statb.onclick=stats;
+$("set").parentNode.insertBefore(statb,$("set"));
+
 function settings(){
  $("mod").innerHTML=`<h3>Réglages</h3>
  <p>Deezer ne diffuse que <b>30 s par morceau</b> dans son lecteur intégré. Avec une clé
@@ -329,7 +360,7 @@ async function deezerAll(type,id){let out=[],i=0;
 async function ytList(id,on){let out=[],tok="";
  for(let p=0;p<100;p++){
   const r=await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${id}&key=${S.key}`+(tok?"&pageToken="+tok:""));
-  const d=await r.json();if(d.error)throw Error(d.error.message||"refusé");
+  const d=await r.json();spend(1,"l");if(d.error)throw Error(d.error.message||"refusé");
   (d.items||[]).forEach(it=>{const s=it.snippet,v=(s.resourceId||{}).videoId;
    if(!v||/^(Private|Deleted) video$/.test(s.title))return;
    out.push({id:"yt"+v,p:"youtube",yt:v,title:s.title,artist:(s.videoOwnerChannelTitle||"").replace(/ - Topic$/,""),
@@ -341,7 +372,7 @@ async function ytList(id,on){let out=[],tok="";
 async function ytFind(t){if(!S.key)return null;
  const q=encodeURIComponent((t.artist?t.artist+" ":"")+t.title);
  const r=await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoEmbeddable=true&maxResults=1&q=${q}&key=${S.key}`);
- const d=await r.json();if(d.error)throw Error(d.error.message||"clé refusée");
+ const d=await r.json();spend(100,"s");if(d.error)throw Error(d.error.message||"clé refusée");
  const it=(d.items||[])[0];return it?it.id.videoId:null}
 async function oembed(p,url){try{
  const a=p==="spotify"?`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`
