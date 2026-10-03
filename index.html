@@ -9,6 +9,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Playlist">
 <link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="preconnect" href="https://www.youtube.com">
+<link rel="preconnect" href="https://i.ytimg.com">
+<link rel="preconnect" href="https://googlevideo.com" crossorigin>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 :root{--bg:#0b0b11;--card:#1a1a26;--line:#2a2a3a;--txt:#ecebf5;--dim:#8b89a3;--acc:#a855f7;--acc2:#22d3ee}
@@ -323,8 +326,8 @@ async function deezerAll(type,id){let out=[],i=0;
    link:t.link||`https://www.deezer.com/track/${t.id}`,h:152}));
   if(d.data.length<100)break;i+=100}
  return out}
-async function ytList(id){let out=[],tok="";
- for(let p=0;p<10;p++){
+async function ytList(id,on){let out=[],tok="";
+ for(let p=0;p<100;p++){
   const r=await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=${id}&key=${S.key}`+(tok?"&pageToken="+tok:""));
   const d=await r.json();if(d.error)throw Error(d.error.message||"refusé");
   (d.items||[]).forEach(it=>{const s=it.snippet,v=(s.resourceId||{}).videoId;
@@ -332,6 +335,7 @@ async function ytList(id){let out=[],tok="";
    out.push({id:"yt"+v,p:"youtube",yt:v,title:s.title,artist:(s.videoOwnerChannelTitle||"").replace(/ - Topic$/,""),
     thumb:`https://img.youtube.com/vi/${v}/mqdefault.jpg`,embed:`https://www.youtube.com/embed/${v}`,
     link:`https://youtu.be/${v}`,h:200})});
+  if(on)on(out.length);
   tok=d.nextPageToken;if(!tok)break}
  return out}
 async function ytFind(t){if(!S.key)return null;
@@ -353,7 +357,8 @@ async function importUrl(){
  let add=[];
  try{
   if(i.p==="deezer"&&i.type!=="track"){add=await deezerAll(i.type,i.id);if(!add.length)throw Error("vide")}
-  else if(i.p==="youtube"&&i.type==="playlist"&&S.key){add=await ytList(i.id);if(!add.length)throw Error("vide")}
+  else if(i.p==="youtube"&&i.type==="playlist"&&S.key){
+   add=await ytList(i.id,n=>say(`<span class="spin"></span>${n} titres récupérés…`));if(!add.length)throw Error("vide")}
   else if(i.p==="youtube"&&i.type==="track"){const o=await oembed("youtube",raw);
    add=[{...i,id:"yt"+i.id,title:(o&&o.title)||"Vidéo YouTube",artist:""}]}
   else throw Error("one")}
@@ -380,12 +385,17 @@ async function addFiles(fl){const pl=PL();let n=0;busy(true);
  await save();render();busy(false);toast(n?`✅ ${n} fichier(s) · hors connexion`:"Aucun fichier ajouté",n?"ok":"err")}
 
 /* ===== Lecteur YouTube piloté (sans habillage) ===== */
-let ytp=null,ytReady=false;
-function loadYT(){return new Promise(res=>{
- if(window.YT&&window.YT.Player)return res(true);
- window.onYouTubeIframeAPIReady=()=>res(true);
- const s=document.createElement("script");s.src="https://www.youtube.com/iframe_api";s.onerror=()=>res(false);
- document.head.appendChild(s);setTimeout(()=>res(!!(window.YT&&window.YT.Player)),5000)})}
+let ytp=null,ytOK=null,ytProm=null;
+function loadYT(){
+ if(ytOK!==null)return Promise.resolve(ytOK);   // résultat mémorisé : plus d'attente
+ if(ytProm)return ytProm;
+ ytProm=new Promise(res=>{
+  if(window.YT&&window.YT.Player){ytOK=true;return res(true)}
+  window.onYouTubeIframeAPIReady=()=>{ytOK=true;res(true)};
+  const s=document.createElement("script");s.src="https://www.youtube.com/iframe_api";
+  s.onerror=()=>{ytOK=false;res(false)};document.head.appendChild(s);
+  setTimeout(()=>{if(ytOK===null){ytOK=!!(window.YT&&window.YT.Player);res(ytOK)}},3000)});
+ return ytProm}
 async function playYT(vid){
  const ok=await loadYT();
  if(!ok||!window.YT||!window.YT.Player)return false;
@@ -393,7 +403,7 @@ async function playYT(vid){
    playerVars:{playsinline:1,controls:1,rel:0,modestbranding:1,autoplay:1,iv_load_policy:3},
    events:{onReady:e=>e.target.playVideo(),
      onStateChange:e=>{if(e.data===YT.PlayerState.ENDED)step(1);
-      $("pp").textContent=e.data===YT.PlayerState.PLAYING?"⏸":"▶"},
+      $("pp").innerHTML=e.data===3?'<span class="spin" style="margin:0"></span>':(e.data===1?"⏸":"▶")},
      onError:()=>toast("Vidéo indisponible","err")}});ytReady=true}
  else ytp.loadVideoById(vid);
  return true}
